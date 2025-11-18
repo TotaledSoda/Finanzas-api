@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\BillController;
 use App\Http\Controllers\Api\CalendarEventController;
 use App\Http\Controllers\Api\TandaController;
 use App\Http\Controllers\Api\SavingGoalController;
+use App\Http\Controllers\Api\SavingGoalMemberController;
 
 // Rutas públicas de auth
 Route::prefix('auth')->group(function () {
@@ -45,4 +46,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/goals',       [SavingGoalController::class, 'store']);
     Route::get('/goals/{id}',   [SavingGoalController::class, 'show']);
     Route::put('/goals/{id}',   [SavingGoalController::class, 'update']);
+
+
+    //METAS DE AHORRO - MIEBROS DE LA META
+
+     // MIENBOROS DE METAS DE AHORRO 
+    Route::post('/goals/{goal}/members', [SavingGoalMemberController::class, 'store']);
 });
