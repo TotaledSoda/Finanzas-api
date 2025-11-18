@@ -20,4 +20,10 @@ class User extends Authenticatable
         'password',
         'remember_token',
     ];
+    public function sharedSavingGoals()
+{
+    return $this->belongsToMany(SavingGoal::class, 'saving_goal_members')
+        ->withPivot(['role', 'expected_contribution'])
+        ->withTimestamps();
+}
 }

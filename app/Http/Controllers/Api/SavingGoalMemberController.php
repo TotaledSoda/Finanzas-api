@@ -9,6 +9,27 @@ use Illuminate\Http\Request;
 
 class SavingGoalMemberController extends Controller
 {
+     public function index(Request $request)
+    {
+        $user = $request->user();
+
+        $goals = SavingGoal::with([
+                'user:id,name,email',
+                'participants:id,name,email',
+            ])
+            ->where(function ($query) use ($user) {
+                $query->where('user_id', $user->id) // metas que creó
+                      ->orWhereHas('participants', function ($q) use ($user) {
+                          // metas donde participa
+                          $q->where('user_id', $user->id);
+                      });
+            })
+            ->orderBy('deadline', 'asc')
+            ->get();
+
+        return response()->json($goals);
+    }
+
     public function store(Request $request, SavingGoal $goal)
     {
         $authUser = $request->user();
@@ -56,4 +77,5 @@ class SavingGoalMemberController extends Controller
             'goal'    => $goal,
         ], 201);
     }
+
 }

@@ -11,12 +11,23 @@ class SavingGoalController extends Controller
     /**
      * Lista las metas de ahorro del usuario autenticado.
      * Soporta filtros: ?status=active|completed|all, ?type=group|personal
+     * Incluye metas que creó y metas en las que participa.
      */
     public function index(Request $request)
     {
         $user = $request->user();
 
-        $query = SavingGoal::where('user_id', $user->id);
+        $query = SavingGoal::with([
+                'user:id,name,email',
+                'participants:id,name,email', // usuarios participantes
+            ])
+            ->where(function ($q) use ($user) {
+                $q->where('user_id', $user->id) // metas que creó
+                  ->orWhereHas('participants', function ($qp) use ($user) {
+                      // metas donde participa
+                      $qp->where('user_id', $user->id);
+                  });
+            });
 
         // Filtro por estado
         if ($request->filled('status') && $request->status !== 'all') {
@@ -60,14 +71,17 @@ class SavingGoalController extends Controller
             'is_group'       => ['nullable', 'boolean'],
         ]);
 
-        $data['user_id'] = $request->user()->id;
-        $data['current_amount'] = $data['current_amount'] ?? 0;
-        $data['is_group'] = $data['is_group'] ?? false;
-        $data['status'] = $data['current_amount'] >= $data['target_amount']
+        $data['user_id']         = $request->user()->id;
+        $data['current_amount']  = $data['current_amount'] ?? 0;
+        $data['is_group']        = $data['is_group'] ?? false;
+        $data['status']          = $data['current_amount'] >= $data['target_amount']
             ? 'completed'
             : 'active';
 
-        $goal = SavingGoal::create($data);
+        $goal = SavingGoal::create($data)->load([
+            'user:id,name,email',
+            'participants:id,name,email',
+        ]);
 
         return response()->json(
             $this->transformGoal($goal),
@@ -76,18 +90,29 @@ class SavingGoalController extends Controller
     }
 
     /**
-     * Muestra una meta específica del usuario.
+     * Muestra una meta específica (si eres dueño o participante).
      */
     public function show(Request $request, $id)
     {
-        $goal = SavingGoal::where('user_id', $request->user()->id)
+        $user = $request->user();
+
+        $goal = SavingGoal::with([
+                'user:id,name,email',
+                'participants:id,name,email',
+            ])
+            ->where(function ($q) use ($user) {
+                $q->where('user_id', $user->id)
+                  ->orWhereHas('participants', function ($qp) use ($user) {
+                      $qp->where('user_id', $user->id);
+                  });
+            })
             ->findOrFail($id);
 
         return response()->json($this->transformGoal($goal));
     }
 
     /**
-     * Actualiza una meta de ahorro.
+     * Actualiza una meta de ahorro (solo el dueño).
      */
     public function update(Request $request, $id)
     {
@@ -118,6 +143,8 @@ class SavingGoalController extends Controller
 
         $goal->save();
 
+        $goal->load(['user:id,name,email', 'participants:id,name,email']);
+
         return response()->json($this->transformGoal($goal));
     }
 
@@ -127,18 +154,34 @@ class SavingGoalController extends Controller
     protected function transformGoal(SavingGoal $goal): array
     {
         return [
-            'id'              => $goal->id,
-            'name'            => $goal->name,
-            'description'     => $goal->description,
-            'target_amount'   => (float) $goal->target_amount,
-            'current_amount'  => (float) $goal->current_amount,
-            'progress_percent'=> $goal->progress_percent, // accessor
-            'deadline'        => optional($goal->deadline)->toDateString(),
-            'category'        => $goal->category,         // para decidir icono/color en React Native
-            'is_group'        => $goal->is_group,
-            'status'          => $goal->status,
-            'created_at'      => $goal->created_at?->toAtomString(),
-            'updated_at'      => $goal->updated_at?->toAtomString(),
+            'id'               => $goal->id,
+            'name'             => $goal->name,
+            'description'      => $goal->description,
+            'target_amount'    => (float) $goal->target_amount,
+            'current_amount'   => (float) $goal->current_amount,
+            'progress_percent' => $goal->progress_percent, // accessor
+            'deadline'         => optional($goal->deadline)->toDateString(),
+            'category'         => $goal->category,
+            'is_group'         => $goal->is_group,
+            'status'           => $goal->status,
+            'owner'            => $goal->user ? [
+                'id'    => $goal->user->id,
+                'name'  => $goal->user->name,
+                'email' => $goal->user->email,
+            ] : null,
+            'participants'     => $goal->participants->map(function ($user) {
+                return [
+                    'id'                   => $user->id,
+                    'name'                 => $user->name,
+                    'email'                => $user->email,
+                    'role'                 => $user->pivot->role,
+                    'expected_contribution'=> $user->pivot->expected_contribution !== null
+                        ? (float) $user->pivot->expected_contribution
+                        : null,
+                ];
+            })->values(),
+            'created_at'       => $goal->created_at?->toAtomString(),
+            'updated_at'       => $goal->updated_at?->toAtomString(),
         ];
     }
 }
