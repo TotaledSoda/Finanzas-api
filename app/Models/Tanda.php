@@ -10,15 +10,15 @@ class Tanda extends Model
     use HasFactory;
 
     protected $fillable = [
-        'organizer_id',
+        'user_id',
         'name',
         'description',
         'total_amount',
         'contribution_amount',
-        'total_rounds',
+        'rounds_total',
         'current_round',
         'start_date',
-        'next_date',
+        'next_payment_date',
         'frequency',
         'status',
     ];
@@ -27,12 +27,12 @@ class Tanda extends Model
         'total_amount'        => 'decimal:2',
         'contribution_amount' => 'decimal:2',
         'start_date'          => 'date',
-        'next_date'           => 'date',
+        'next_payment_date'   => 'date',
     ];
 
-    public function organizer()
+    public function user()
     {
-        return $this->belongsTo(User::class, 'organizer_id');
+        return $this->belongsTo(User::class);
     }
 
     public function members()
@@ -40,25 +40,22 @@ class Tanda extends Model
         return $this->hasMany(TandaMember::class);
     }
 
-    // Progreso de la tanda (ej: 3/12 → 25%)
+    public function participants()
+    {
+        return $this->belongsToMany(User::class, 'tanda_members')
+            ->withPivot(['position', 'is_owner'])
+            ->withTimestamps();
+    }
+
+    // porcentaje de progreso basado en la ronda actual
     public function getProgressPercentAttribute(): float
     {
-        if ($this->total_rounds <= 0) {
+        if ($this->rounds_total <= 0) {
             return 0;
         }
 
-        $percent = ($this->current_round / $this->total_rounds) * 100;
+        $percent = ($this->current_round / $this->rounds_total) * 100;
 
         return round(min($percent, 100), 2);
-    }
-
-    public function getIsActiveAttribute(): bool
-    {
-        return $this->status === 'active';
-    }
-
-    public function getIsFinishedAttribute(): bool
-    {
-        return $this->status === 'finished';
     }
 }

@@ -10,38 +10,21 @@ return new class extends Migration
     {
         Schema::create('tandas', function (Blueprint $table) {
             $table->id();
-
-            // Usuario creador / organizador
-            $table->foreignId('organizer_id')
-                  ->constrained('users')
-                  ->onDelete('cascade');
-
-            $table->string('name');             // Ahorro para Viaje, Fondo de Emergencia...
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete(); // dueño
+            $table->string('name');
             $table->text('description')->nullable();
 
-            // Monto total de la tanda (ej: 12,000)
-            $table->decimal('total_amount', 12, 2);
+            $table->decimal('total_amount', 12, 2)->default(0);        // monto total de la tanda
+            $table->decimal('contribution_amount', 12, 2);             // cuánto aporta cada ronda
+            $table->unsignedInteger('rounds_total');                   // número de rondas / participantes
+            $table->unsignedInteger('current_round')->default(1);      // ronda actual
 
-            // Aportación por ronda (ej: 1,000)
-            $table->decimal('contribution_amount', 12, 2);
+            $table->date('start_date');                                // inicio
+            $table->date('next_payment_date')->nullable();             // próximo pago
+            $table->string('frequency')->default('monthly');           // weekly|biweekly|monthly
 
-            // Número total de rondas (participantes)
-            $table->unsignedInteger('total_rounds');
-
-            // Ronda actual (para el progreso 3/12, 8/10, etc.)
-            $table->unsignedInteger('current_round')->default(1);
-
-            // Fecha de inicio (primera ronda)
-            $table->date('start_date');
-
-            // Próxima fecha de pago/cobro
-            $table->date('next_date')->nullable();
-
-            // Frecuencia de pago (para futuro cálculo automático)
-            $table->string('frequency')->default('monthly'); // weekly | biweekly | monthly
-
-            // Estado de la tanda
-            $table->string('status')->default('active'); // active | upcoming | finished | cancelled
+            $table->enum('status', ['active', 'upcoming', 'finished', 'cancelled'])
+                  ->default('active');
 
             $table->timestamps();
         });

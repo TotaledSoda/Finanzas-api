@@ -31,15 +31,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/bills',       [BillController::class, 'store']);
     Route::get('/bills/{id}',   [BillController::class, 'show']);
     Route::put('/bills/{id}',   [BillController::class, 'update']);
-    Route::delete('/bills/{id}',[BillController::class, 'destroy']);
+    Route::delete('/bills/{id}', [BillController::class, 'destroy']);
 
     // Calendario financiero
     Route::get('/calendar/events', [CalendarEventController::class, 'index']);
 
+ 
     // Tandas
     Route::get('/tandas',       [TandaController::class, 'index']);
     Route::post('/tandas',      [TandaController::class, 'store']);
     Route::get('/tandas/{id}',  [TandaController::class, 'show']);
+
 
     // Metas de ahorro
     Route::get('/goals',        [SavingGoalController::class, 'index']);
@@ -50,8 +52,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     //METAS DE AHORRO - MIEBROS DE LA META
 
-     // MIENBOROS DE METAS DE AHORRO 
+    // MIENBOROS DE METAS DE AHORRO 
     Route::post('/goals/{goal}/members', [SavingGoalMemberController::class, 'store']);
     Route::post('/goals/{id}/deposit', [SavingGoalController::class, 'deposit']);
-
 });
