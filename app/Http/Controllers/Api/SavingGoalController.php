@@ -184,4 +184,44 @@ class SavingGoalController extends Controller
             'updated_at'       => $goal->updated_at?->toAtomString(),
         ];
     }
+    /**
+ * Permite agregar dinero a una meta (dueño o participante).
+ */
+public function deposit(Request $request, $id)
+{
+    $user = $request->user();
+
+    $data = $request->validate([
+        'amount'      => ['required', 'numeric', 'min:0.01'],
+        'description' => ['nullable', 'string', 'max:255'],
+    ]);
+
+    // Buscar la meta donde ERES dueño o participante
+    $goal = SavingGoal::with(['participants'])
+        ->where(function ($q) use ($user) {
+            $q->where('user_id', $user->id)
+              ->orWhereHas('participants', function ($qp) use ($user) {
+                  $qp->where('user_id', $user->id);
+              });
+        })
+        ->findOrFail($id);
+
+    // Sumar el depósito
+    $goal->current_amount = $goal->current_amount + $data['amount'];
+
+    // Recalcular estado
+    if ($goal->current_amount >= $goal->target_amount && $goal->target_amount > 0) {
+        $goal->status = 'completed';
+    } elseif ($goal->status === 'completed' && $goal->current_amount < $goal->target_amount) {
+        $goal->status = 'active';
+    }
+
+    $goal->save();
+
+    // Recargar relaciones
+    $goal->load(['user:id,name,email', 'participants:id,name,email']);
+
+    return response()->json($this->transformGoal($goal));
+}
+
 }

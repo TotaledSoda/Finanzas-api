@@ -52,4 +52,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
      // MIENBOROS DE METAS DE AHORRO 
     Route::post('/goals/{goal}/members', [SavingGoalMemberController::class, 'store']);
+    Route::post('/goals/{id}/deposit', [SavingGoalController::class, 'deposit']);
+
 });
