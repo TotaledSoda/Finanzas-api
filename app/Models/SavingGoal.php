@@ -2,14 +2,10 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use App\Models\SavingGoalMember;
 
 class SavingGoal extends Model
 {
-    use HasFactory;
-
     protected $fillable = [
         'user_id',
         'name',
@@ -23,41 +19,43 @@ class SavingGoal extends Model
     ];
 
     protected $casts = [
-        'deadline'       => 'date',
-        'is_group'       => 'boolean',
         'target_amount'  => 'decimal:2',
         'current_amount' => 'decimal:2',
+        'deadline'       => 'date',
+        'is_group'       => 'boolean',
     ];
 
-    // Dueño de la meta
-    public function user()
+    protected $appends = [
+        'progress_percent',
+    ];
+
+    public function owner()
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(User::class, 'user_id');
     }
 
-    // Miembros de la meta (relación con la tabla saving_goal_members)
-    public function members()
-    {
-        return $this->hasMany(SavingGoalMember::class);
-    }
-
-    // Participantes (usuarios) a través de saving_goal_members
+    // 👇 Aquí usamos tu tabla saving_goal_members
     public function participants()
     {
         return $this->belongsToMany(User::class, 'saving_goal_members')
-            ->withPivot(['role', 'expected_contribution'])
+            ->withPivot('role', 'expected_contribution')
             ->withTimestamps();
     }
 
-    // Porcentaje de progreso
+    public function movements()
+    {
+        return $this->hasMany(SavingGoalMovement::class);
+    }
+
     public function getProgressPercentAttribute(): float
     {
-        if ($this->target_amount <= 0) {
-            return 0;
+        $target  = (float) ($this->target_amount ?? 0);
+        $current = (float) ($this->current_amount ?? 0);
+
+        if ($target <= 0) {
+            return 0.0;
         }
 
-        $percent = ($this->current_amount / $this->target_amount) * 100;
-
-        return round(min($percent, 100), 2);
+        return min(100, round(($current / $target) * 100, 1));
     }
 }

@@ -60,4 +60,40 @@ class Bill extends Model
 
         return Carbon::today()->diffInDays($this->due_date, false);
     }
+
+    // Texto amigable para el estado (usado en el calendario)
+    public function getStatusTextAttribute(): ?string
+    {
+        $days = $this->days_until_due;
+
+        if ($this->is_paid) {
+            return 'Pagado';
+        }
+
+        if ($this->is_overdue) {
+            return 'Vencido';
+        }
+
+        if ($days === null) {
+            return null;
+        }
+
+        if ($days === 0) {
+            return 'Vence hoy';
+        }
+
+        if ($days === 1) {
+            return 'Vence en 1 día';
+        }
+
+        if ($days > 1) {
+            return "Vence en {$days} días";
+        }
+
+        return 'Vencido';
+    }
+      public function events()
+    {
+        return $this->morphMany(FinancialEvent::class, 'eventable');
+    }
 }

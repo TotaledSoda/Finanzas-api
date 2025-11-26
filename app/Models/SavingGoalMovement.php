@@ -3,23 +3,29 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class SavingGoalMember extends Model
+class SavingGoalMovement extends Model
 {
     protected $fillable = [
         'saving_goal_id',
         'user_id',
-        'role',
-        'expected_contribution',
+        'date',
+        'amount',
+        'type',
+        'description',
     ];
 
-    public function goal(): BelongsTo
+    protected $casts = [
+        'date'   => 'date',
+        'amount' => 'decimal:2',
+    ];
+
+    public function goal()
     {
         return $this->belongsTo(SavingGoal::class, 'saving_goal_id');
     }
 
-    public function user(): BelongsTo
+    public function user()
     {
         return $this->belongsTo(User::class);
     }

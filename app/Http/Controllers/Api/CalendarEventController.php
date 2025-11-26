@@ -27,7 +27,6 @@ class CalendarEventController extends Controller
                 [$year, $month] = explode('-', $monthParam);
                 $start = Carbon::createFromDate((int) $year, (int) $month, 1)->startOfDay();
             } catch (\Throwable $e) {
-                // Si el formato viene mal, usar mes actual
                 $start = Carbon::now()->startOfMonth();
             }
         } else {
@@ -41,16 +40,14 @@ class CalendarEventController extends Controller
             ->whereBetween('due_date', [$start->toDateString(), $end->toDateString()])
             ->get()
             ->map(fn (Bill $bill) => [
-                'date'        => $bill->due_date->toDateString(),
+                'date'        => $bill->due_date?->toDateString(),
                 'type'        => 'bill',
                 'source'      => 'bill',
                 'source_id'   => $bill->id,
                 'title'       => $bill->name,
-                'subtitle'    => $bill->status_text ?? null,
+                'subtitle'    => $bill->status_text,
                 'amount'      => (float) $bill->amount,
                 'category'    => $bill->category ?? 'bill',
-                // para la vista puedes mapear:
-                // bill → accent-bill / icon credit_card, bolt, house, wifi, etc.
             ]);
 
         // 2) Metas de ahorro (saving_goals) por fecha límite
@@ -59,7 +56,7 @@ class CalendarEventController extends Controller
             ->whereBetween('deadline', [$start->toDateString(), $end->toDateString()])
             ->get()
             ->map(fn (SavingGoal $goal) => [
-                'date'        => $goal->deadline->toDateString(),
+                'date'        => $goal->deadline?->toDateString(),
                 'type'        => 'goal',
                 'source'      => 'goal',
                 'source_id'   => $goal->id,
@@ -67,37 +64,35 @@ class CalendarEventController extends Controller
                 'subtitle'    => 'Meta de ahorro',
                 'amount'      => (float) $goal->target_amount,
                 'category'    => $goal->category ?? 'goal',
-                // UI: goal → accent-goal, icon savings / target / flight / car / laptop
             ]);
 
-        // 3) Tandas (tandas) usando next_date
+        // 3) Tandas usando next_payment_date
         $tandas = Tanda::where(function ($q) use ($user) {
-                $q->where('organizer_id', $user->id)
-                  ->orWhereHas('members', function ($q2) use ($user) {
+                $q->where('user_id', $user->id)
+                  ->orWhereHas('participants', function ($q2) use ($user) {
                       $q2->where('user_id', $user->id);
                   });
             })
-            ->whereNotNull('next_date')
-            ->whereBetween('next_date', [$start->toDateString(), $end->toDateString()])
+            ->whereNotNull('next_payment_date')
+            ->whereBetween('next_payment_date', [$start->toDateString(), $end->toDateString()])
             ->get()
             ->map(fn (Tanda $tanda) => [
-                'date'        => $tanda->next_date->toDateString(),
+                'date'        => $tanda->next_payment_date?->toDateString(),
                 'type'        => 'tanda',
                 'source'      => 'tanda',
                 'source_id'   => $tanda->id,
                 'title'       => $tanda->name,
-                'subtitle'    => 'Tanda (' . $tanda->current_round . '/' . $tanda->total_rounds . ')',
+                'subtitle'    => 'Tanda (' . $tanda->current_round . '/' . $tanda->rounds_total . ')',
                 'amount'      => (float) $tanda->contribution_amount,
                 'category'    => 'tanda',
-                // UI: tanda → accent-tanda, icon groups / savings
             ]);
 
-        // 4) Eventos manuales (calendar_events)
+        // 4) Eventos manuales
         $manualEvents = CalendarEvent::where('user_id', $user->id)
             ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
             ->get()
             ->map(fn (CalendarEvent $event) => [
-                'date'        => $event->date->toDateString(),
+                'date'        => $event->date?->toDateString(),
                 'type'        => 'custom',
                 'source'      => 'calendar_event',
                 'source_id'   => $event->id,
@@ -107,7 +102,6 @@ class CalendarEventController extends Controller
                 'category'    => $event->category ?? 'custom',
             ]);
 
-        // Unir todo en una sola colección y ordenarlo por fecha
         $events = $bills
             ->merge($goals)
             ->merge($tandas)

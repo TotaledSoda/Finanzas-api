@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use App\Models\FinancialEvent;
 
 class Tanda extends Model
 {
@@ -14,6 +15,7 @@ class Tanda extends Model
         'name',
         'contribution_amount',
         'total_amount',
+        'rounds_total',
         'start_date',
         'frequency',
         'current_round',
@@ -28,8 +30,14 @@ class Tanda extends Model
         'next_payment_date'   => 'date',
     ];
 
-    // Dueño / organizador (ahora usamos user_id)
+    // Dueño / organizador
     public function organizer()
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    // Alias para que $tanda->user funcione en controllers viejos
+    public function user()
     {
         return $this->belongsTo(User::class, 'user_id');
     }
@@ -44,8 +52,23 @@ class Tanda extends Model
     public function participants()
     {
         return $this->belongsToMany(User::class, 'tanda_members')
-            // 👇 AQUÍ QUITAMOS position Y SOLO USAMOS is_owner (y lo que realmente exista)
-            ->withPivot(['is_owner'])
+            ->withPivot(['position', 'is_owner'])
             ->withTimestamps();
+    }
+
+    // Progreso en %
+    public function getProgressPercentAttribute(): float
+    {
+        if ($this->rounds_total <= 0) {
+            return 0;
+        }
+
+        $percent = ($this->current_round / $this->rounds_total) * 100;
+
+        return round(min($percent, 100), 2);
+    }
+     public function events()
+    {
+        return $this->morphMany(FinancialEvent::class, 'eventable');
     }
 }

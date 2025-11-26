@@ -26,4 +26,14 @@ class User extends Authenticatable
         ->withPivot(['role', 'expected_contribution'])
         ->withTimestamps();
 }
+public function weeklyIncomes()
+{
+    return $this->hasMany(WeeklyIncome::class);
+}
+
+public function expenses()
+{
+    return $this->hasMany(Expense::class);
+}
+
 }
