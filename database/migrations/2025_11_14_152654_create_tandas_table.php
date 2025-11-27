@@ -6,15 +6,12 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('tandas', function (Blueprint $table) {
             $table->id();
 
-            // Dueño/creador de la tanda
+            // Dueño/organizador de la tanda
             $table->foreignId('user_id')
                 ->constrained()
                 ->onDelete('cascade');
@@ -22,37 +19,32 @@ return new class extends Migration
             $table->string('name');
             $table->text('description')->nullable();
 
-            // Aporte por ronda
-            $table->decimal('contribution_amount', 10, 2);
+            // Aportación fija por periodo (lo que pone cada persona cada vuelta)
+            $table->decimal('contribution_amount', 12, 2);
 
-            // Número total de rondas (personas)
-            $table->unsignedInteger('rounds_total');
+            // Número de personas / lugares en la tanda
+            $table->unsignedInteger('num_members');
 
-            // Fecha de inicio de la tanda
+            // Monto total del "cajón"
+            $table->decimal('pot_amount', 12, 2);
+
+            // Frecuencia de pago
+            $table->enum('frequency', ['weekly', 'biweekly', 'monthly'])
+                ->default('weekly');
+
+            // Cuándo arranca la tanda
             $table->date('start_date');
 
-            // Frecuencia de pago: weekly, biweekly, monthly
-            $table->string('frequency', 20);
-
-            // Monto total de la tanda (contribution_amount * rounds_total)
-            $table->decimal('total_amount', 10, 2);
-
-            // Ronda actual (1, 2, 3, ...)
+            // Vuelta actual
             $table->unsignedInteger('current_round')->default(1);
 
-            // Estado de la tanda: active, finished, cancelled
-            $table->string('status', 20)->default('active');
-
-            // Próxima fecha de pago
-            $table->date('next_payment_date')->nullable();
+            // active | completed | cancelled
+            $table->string('status')->default('active');
 
             $table->timestamps();
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('tandas');

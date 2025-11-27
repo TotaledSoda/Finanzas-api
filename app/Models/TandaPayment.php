@@ -4,19 +4,22 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class TandaMember extends Model
+class TandaPayment extends Model
 {
     protected $fillable = [
         'tanda_id',
         'user_id',
-        'turn_order',
-        'has_received',
-        'received_at',
+        'due_date',
+        'paid_at',
+        'amount',
+        'status',
+        'notes',
     ];
 
     protected $casts = [
-        'has_received' => 'boolean',
-        'received_at'  => 'date',
+        'due_date' => 'date',
+        'paid_at'  => 'date',
+        'amount'   => 'decimal:2',
     ];
 
     public function tanda()

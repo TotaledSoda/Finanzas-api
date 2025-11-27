@@ -4,165 +4,137 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\SavingGoal;
-use App\Models\SavingGoalMovement;
-use App\Models\CalendarEvent;
+use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class SavingGoalController extends Controller
 {
     /**
-     * Listado de metas donde el usuario es dueño o miembro.
+     * Listar metas de ahorro del usuario (dueño o participante).
      */
     public function index(Request $request)
     {
         $user = $request->user();
 
-        $goals = SavingGoal::with('owner:id,name,email')
+        $goals = SavingGoal::with(['participants'])
             ->where(function ($q) use ($user) {
                 $q->where('user_id', $user->id)
                   ->orWhereHas('participants', function ($qp) use ($user) {
                       $qp->where('user_id', $user->id);
                   });
             })
-            ->orderBy('deadline', 'asc')
-            ->get()
-            ->map(function (SavingGoal $goal) {
-                return [
-                    'id'               => $goal->id,
-                    'name'             => $goal->name,
-                    'description'      => $goal->description,
-                    'target_amount'    => (float) $goal->target_amount,
-                    'current_amount'   => (float) $goal->current_amount,
-                    'progress_percent' => $goal->progress_percent,
-                    'deadline'         => optional($goal->deadline)->toDateString(),
-                    'category'         => $goal->category,
-                    'status'           => $goal->status,
-                    'is_group'         => (bool) $goal->is_group,
-                ];
-            });
+            ->orderBy('created_at', 'desc')
+            ->get();
 
         return response()->json($goals);
     }
 
     /**
-     * Crear meta de ahorro.
+     * Crear nueva meta de ahorro.
      */
     public function store(Request $request)
     {
         $user = $request->user();
 
         $data = $request->validate([
-            'name'          => ['required', 'string', 'max:255'],
-            'description'   => ['nullable', 'string'],
-            'target_amount' => ['required', 'numeric', 'min:0.01'],
-            'deadline'      => ['nullable', 'date'],
-            'category'      => ['nullable', 'string', 'max:100'],
-            'is_group'      => ['sometimes', 'boolean'],
+            'name'           => ['required', 'string', 'max:255'],
+            'description'    => ['nullable', 'string'],
+            'target_amount'  => ['required', 'numeric', 'min:0.01'],
+            'current_amount' => ['nullable', 'numeric', 'min:0'],
+            'deadline'       => ['nullable', 'date'],
+            'category'       => ['nullable', 'string', 'max:100'],
+            'is_group'       => ['boolean'],
         ]);
 
-        $goal = SavingGoal::create([
-            'user_id'        => $user->id,
-            'name'           => $data['name'],
-            'description'    => $data['description'] ?? null,
-            'target_amount'  => $data['target_amount'],
-            'current_amount' => 0,
-            'deadline'       => $data['deadline'] ?? null,
-            'category'       => $data['category'] ?? null,
-            'is_group'       => $data['is_group'] ?? false,
-            'status'         => 'active',
-        ]);
+        $goal = new SavingGoal();
+        $goal->user_id        = $user->id;
+        $goal->name           = $data['name'];
+        $goal->description    = $data['description'] ?? null;
+        $goal->target_amount  = $data['target_amount'];
+        $goal->current_amount = $data['current_amount'] ?? 0;
+        $goal->deadline       = $data['deadline'] ?? null;
+        $goal->category       = $data['category'] ?? null;
+        $goal->is_group       = $data['is_group'] ?? false;
+        $goal->status         = 'active';
+        $goal->save();
 
-        // Opcional: dueñ@ como miembro owner en saving_goal_members
+        // El dueño también es participante (como owner)
         $goal->participants()->syncWithoutDetaching([
             $user->id => [
-                'role' => 'owner',
-                'expected_contribution' => null,
+                'role'                 => 'owner',
+                'expected_contribution'=> null,
             ],
         ]);
 
-        return response()->json([
-            'id'               => $goal->id,
-            'name'             => $goal->name,
-            'description'      => $goal->description,
-            'target_amount'    => (float) $goal->target_amount,
-            'current_amount'   => (float) $goal->current_amount,
-            'progress_percent' => $goal->progress_percent,
-            'deadline'         => optional($goal->deadline)->toDateString(),
-            'category'         => $goal->category,
-            'status'           => $goal->status,
-            'is_group'         => (bool) $goal->is_group,
-        ], 201);
+        $goal->load('participants');
+
+        return response()->json($goal, 201);
     }
 
     /**
-     * Aportar dinero a una meta (se conecta con ahorro total + calendario).
+     * Registrar un depósito (aporte) a una meta.
      */
-    public function addContribution(Request $request, SavingGoal $savingGoal)
+    public function contribute(Request $request, SavingGoal $savingGoal)
     {
         $user = $request->user();
 
-        // dueño o miembro
-        $isOwner = $savingGoal->user_id === $user->id;
-        $isMember = $savingGoal->participants()
-            ->where('users.id', $user->id)
-            ->exists();
+        $data = $request->validate([
+            'amount' => ['required', 'numeric', 'min:0.01'],
+        ]);
 
-        if (! $isOwner && ! $isMember) {
-            return response()->json(['message' => 'No autorizado'], 403);
+        $savingGoal->current_amount = $savingGoal->current_amount + $data['amount'];
+
+        if ($savingGoal->current_amount >= $savingGoal->target_amount && $savingGoal->target_amount > 0) {
+            $savingGoal->status = 'completed';
+        }
+
+        $savingGoal->save();
+
+        $savingGoal->load('participants');
+
+        return response()->json([
+            'ok'   => true,
+            'goal' => $savingGoal,
+        ]);
+    }
+
+    /**
+     * ➕ Agregar miembro a una meta grupal por correo.
+     */
+    public function addMember(Request $request, SavingGoal $savingGoal)
+    {
+        $userAuth = $request->user();
+
+        if ($savingGoal->user_id !== $userAuth->id) {
+            abort(403, 'No tienes permiso para modificar esta meta.');
         }
 
         $data = $request->validate([
-            'amount'      => ['required', 'numeric', 'min:0.01'],
-            'date'        => ['nullable', 'date'],
-            'description' => ['nullable', 'string', 'max:255'],
+            'email' => ['required', 'email'],
+            'expected_contribution' => ['nullable', 'numeric', 'min:0'],
         ]);
 
-        $amount = (float) $data['amount'];
-        $date   = $data['date'] ?? now()->toDateString();
+        $user = User::where('email', $data['email'])->first();
 
-        DB::transaction(function () use ($savingGoal, $user, $amount, $date, $data) {
-
-            // 1) Incrementar current_amount → esto impacta en "ahorro total" del dashboard
-            $savingGoal->increment('current_amount', $amount);
-
-            // 2) Registrar movimiento de ahorro
-            $movement = $savingGoal->movements()->create([
-                'user_id'     => $user->id,
-                'date'        => $date,
-                'amount'      => $amount,
-                'type'        => 'deposit',
-                'description' => $data['description'] ?? null,
+        if (! $user) {
+            throw ValidationException::withMessages([
+                'email' => ['No se encontró un usuario con ese correo.'],
             ]);
+        }
 
-            // 3) Crear evento en calendario como gasto de ese día
-            CalendarEvent::create([
-                'user_id'     => $user->id,
-                'date'        => $date,
-                'title'       => 'Ahorro: ' . $savingGoal->name,
-                'type'        => 'saving_goal',  // importante para el front
-                'amount'      => $amount,        // se considera como gasto desde el sueldo
-                'source_type' => SavingGoal::class,
-                'source_id'   => $savingGoal->id,
-                'metadata'    => [
-                    'movement_id' => $movement->id,
-                ],
-            ]);
-        });
+        $savingGoal->participants()->syncWithoutDetaching([
+            $user->id => [
+                'role'                  => 'member',
+                'expected_contribution' => $data['expected_contribution'] ?? null,
+            ],
+        ]);
 
-        $savingGoal->refresh();
+        $savingGoal->load('participants');
 
         return response()->json([
-            'id'               => $savingGoal->id,
-            'name'             => $savingGoal->name,
-            'description'      => $savingGoal->description,
-            'target_amount'    => (float) $savingGoal->target_amount,
-            'current_amount'   => (float) $savingGoal->current_amount,
-            'progress_percent' => $savingGoal->progress_percent,
-            'deadline'         => optional($savingGoal->deadline)->toDateString(),
-            'category'         => $savingGoal->category,
-            'status'           => $savingGoal->status,
-            'is_group'         => (bool) $savingGoal->is_group,
+            'ok'   => true,
+            'goal' => $savingGoal,
         ]);
     }
 }

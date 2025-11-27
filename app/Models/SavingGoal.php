@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class SavingGoal extends Model
 {
@@ -19,10 +20,10 @@ class SavingGoal extends Model
     ];
 
     protected $casts = [
-        'target_amount'  => 'decimal:2',
-        'current_amount' => 'decimal:2',
-        'deadline'       => 'date',
-        'is_group'       => 'boolean',
+        'target_amount'   => 'float',   // 👈 en vez de decimal:2
+        'current_amount'  => 'float',   // 👈 en vez de decimal:2
+        'deadline'        => 'date',
+        'is_group'        => 'boolean',
     ];
 
     protected $appends = [
@@ -34,8 +35,8 @@ class SavingGoal extends Model
         return $this->belongsTo(User::class, 'user_id');
     }
 
-    // 👇 Aquí usamos tu tabla saving_goal_members
-    public function participants()
+    // Tabla saving_goal_members
+    public function participants(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'saving_goal_members')
             ->withPivot('role', 'expected_contribution')

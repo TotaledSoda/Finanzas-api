@@ -4,39 +4,36 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Tanda;
+use App\Models\User;
+use App\Models\TandaPayment;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class TandaController extends Controller
 {
+    /**
+     * Listar tandas donde el usuario es dueño o miembro.
+     */
     public function index(Request $request)
     {
         $user = $request->user();
 
-        $query = Tanda::with([
-                'user:id,name,email',
-                'participants:id,name,email',
-            ])
+        $tandas = Tanda::with(['members', 'payments'])
             ->where(function ($q) use ($user) {
                 $q->where('user_id', $user->id)
-                  ->orWhereHas('participants', function ($qp) use ($user) {
+                  ->orWhereHas('members', function ($qp) use ($user) {
                       $qp->where('user_id', $user->id);
                   });
-            });
-
-        if ($request->filled('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
-        }
-
-        $tandas = $query
-            ->orderBy('start_date', 'desc')
-            ->get()
-            ->map(function (Tanda $tanda) use ($user) {
-                return $this->transformTanda($tanda, $user->id);
-            });
+            })
+            ->orderBy('created_at', 'desc')
+            ->get();
 
         return response()->json($tandas);
     }
 
+    /**
+     * Crear una nueva tanda.
+     */
     public function store(Request $request)
     {
         $user = $request->user();
@@ -45,89 +42,126 @@ class TandaController extends Controller
             'name'                => ['required', 'string', 'max:255'],
             'description'         => ['nullable', 'string'],
             'contribution_amount' => ['required', 'numeric', 'min:0.01'],
-            'rounds_total'        => ['required', 'integer', 'min:2'],
+            'num_members'         => ['required', 'integer', 'min:2'],
+            'frequency'           => ['required', 'in:weekly,biweekly,monthly'],
             'start_date'          => ['required', 'date'],
-            'frequency'           => ['required', 'string', 'in:weekly,biweekly,monthly'],
         ]);
 
-        // monto total = aporte * número de rondas
-        $data['total_amount'] = $data['contribution_amount'] * $data['rounds_total'];
-        $data['user_id']      = $user->id;
-        $data['current_round'] = 1;
-        $data['status']        = 'active';
+        $potAmount = $data['contribution_amount'] * $data['num_members'];
 
-        // por ahora next_payment_date = start_date
-        $data['next_payment_date'] = $data['start_date'];
-
-        $tanda = Tanda::create($data);
-
-        // Agregamos al dueño como miembro
-        $tanda->participants()->attach($user->id, [
-            'position' => 1,
-            'is_owner' => true,
+        $tanda = Tanda::create([
+            'user_id'             => $user->id,
+            'name'                => $data['name'],
+            'description'         => $data['description'] ?? null,
+            'contribution_amount' => $data['contribution_amount'],
+            'num_members'         => $data['num_members'],
+            'pot_amount'          => $potAmount,
+            'frequency'           => $data['frequency'],
+            'start_date'          => $data['start_date'],
+            'current_round'       => 1,
+            'status'              => 'active',
         ]);
 
-        $tanda->load(['user:id,name,email', 'participants:id,name,email']);
+        // El dueño entra como miembro turno 1
+        $tanda->members()->syncWithoutDetaching([
+            $user->id => [
+                'turn_order'   => 1,
+                'has_received' => false,
+                'received_at'  => null,
+            ],
+        ]);
 
-        return response()->json(
-            $this->transformTanda($tanda, $user->id),
-            201
-        );
+        $tanda->load(['members', 'payments']);
+
+        return response()->json($tanda, 201);
     }
 
-    public function show(Request $request, $id)
+    /**
+     * Agregar miembro a la tanda por correo.
+     * (similar a saving goals)
+     */
+    public function addMember(Request $request, Tanda $tanda)
+    {
+        $userAuth = $request->user();
+
+        // Solo el dueño puede agregar miembros
+        if ($tanda->user_id !== $userAuth->id) {
+            abort(403, 'No tienes permiso para modificar esta tanda.');
+        }
+
+        $data = $request->validate([
+            'email'      => ['required', 'email'],
+            'turn_order' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $user = User::where('email', $data['email'])->first();
+
+        if (! $user) {
+            throw ValidationException::withMessages([
+                'email' => ['No se encontró un usuario con ese correo.'],
+            ]);
+        }
+
+        $tanda->members()->syncWithoutDetaching([
+            $user->id => [
+                'turn_order'   => $data['turn_order'],
+                'has_received' => false,
+                'received_at'  => null,
+            ],
+        ]);
+
+        $tanda->load(['members', 'payments']);
+
+        return response()->json([
+            'ok'    => true,
+            'tanda' => $tanda,
+        ]);
+    }
+
+    /**
+     * Registrar un pago de la tanda (aporte de un miembro).
+     * Aquí luego podemos enganchar el ahorro total y el calendario.
+     */
+    public function registerPayment(Request $request, Tanda $tanda)
     {
         $user = $request->user();
 
-        $tanda = Tanda::with([
-                'user:id,name,email',
-                'participants:id,name,email',
-            ])
-            ->where(function ($q) use ($user) {
-                $q->where('user_id', $user->id)
-                  ->orWhereHas('participants', function ($qp) use ($user) {
-                      $qp->where('user_id', $user->id);
-                  });
-            })
-            ->findOrFail($id);
+        // podrías validar que sólo miembros de la tanda puedan pagar
+        if (
+            $tanda->user_id !== $user->id &&
+            ! $tanda->members()->where('users.id', $user->id)->exists()
+        ) {
+            abort(403, 'No perteneces a esta tanda.');
+        }
 
-        return response()->json($this->transformTanda($tanda, $user->id));
-    }
+        $data = $request->validate([
+            'amount'   => ['required', 'numeric', 'min:0.01'],
+            'due_date' => ['nullable', 'date'],
+            'paid_at'  => ['nullable', 'date'],
+            'notes'    => ['nullable', 'string'],
+        ]);
 
-    protected function transformTanda(Tanda $tanda, int $currentUserId): array
-    {
-        $role = $tanda->user_id === $currentUserId ? 'owner' : 'member';
+        $payment = new TandaPayment();
+        $payment->tanda_id = $tanda->id;
+        $payment->user_id  = $user->id;
+        $payment->amount   = $data['amount'];
+        $payment->due_date = $data['due_date'] ?? null;
+        $payment->paid_at  = $data['paid_at'] ?? now();
+        $payment->status   = 'paid';
+        $payment->notes    = $data['notes'] ?? null;
+        $payment->save();
 
-        return [
-            'id'                   => $tanda->id,
-            'name'                 => $tanda->name,
-            'description'          => $tanda->description,
-            'role'                 => $role,
-            'total_amount'         => (float) $tanda->total_amount,
-            'contribution_amount'  => (float) $tanda->contribution_amount,
-            'rounds_total'         => $tanda->rounds_total,
-            'current_round'        => $tanda->current_round,
-            'progress_percent'     => $tanda->progress_percent,
-            'start_date'           => optional($tanda->start_date)->toDateString(),
-            'next_payment_date'    => optional($tanda->next_payment_date)->toDateString(),
-            'frequency'            => $tanda->frequency,
-            'status'               => $tanda->status,
-            'owner'                => $tanda->user ? [
-                'id'    => $tanda->user->id,
-                'name'  => $tanda->user->name,
-                'email' => $tanda->user->email,
-            ] : null,
-            'participants'         => $tanda->participants->map(function ($user) {
-                return [
-                    'id'       => $user->id,
-                    'name'     => $user->name,
-                    'email'    => $user->email,
-                    'position' => $user->pivot->position,
-                    'is_owner' => (bool) $user->pivot->is_owner,
-                ];
-            })->values(),
-            'created_at'           => $tanda->created_at?->toAtomString(),
-            'updated_at'           => $tanda->updated_at?->toAtomString(),
-        ];
+        // TODO: aquí podemos:
+        //  - Descontar del sueldo/semana (Expense)
+        //  - Aumentar el ahorro total si aplica
+        //  - Generar/actualizar evento de calendario con due_date
+
+        $tanda->load(['members', 'payments']);
+
+        return response()->json([
+            'ok'      => true,
+            'tanda'   => $tanda,
+            'payment' => $payment,
+        ]);
     }
 }

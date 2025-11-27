@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\CalendarController;
 
 
 
+
 // 🔐 AUTH (las rutas que tu app está usando: /api/auth/register, /api/auth/login)
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -42,10 +43,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/saving-goals', [SavingGoalController::class, 'store']);
 
     // Aportar a una meta específica
-    Route::post('/saving-goals/{savingGoal}/contribute', [SavingGoalController::class, 'addContribution']);
+       Route::post('/saving-goals/{savingGoal}/contribute', [SavingGoalController::class, 'contribute']);
+         Route::post('/saving-goals/{savingGoal}/members', [SavingGoalController::class, 'addMember']);
+      
 
-    // 👥 Tandas
-    Route::apiResource('tandas', TandaController::class)->only(['index', 'store', 'show']);
+   
+    // TANDAS
+    Route::get('/tandas', [TandaController::class, 'index']);
+    Route::post('/tandas', [TandaController::class, 'store']);
+    Route::post('/tandas/{tanda}/members', [TandaController::class, 'addMember']);
+    Route::post('/tandas/{tanda}/payments', [TandaController::class, 'registerPayment']);
 
     // 💸 Gastos
      Route::apiResource('expenses', ExpenseController::class)

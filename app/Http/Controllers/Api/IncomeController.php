@@ -4,7 +4,7 @@ use App\Models\WeeklyIncome;
 use App\Models\Expense;
 use Illuminate\Support\Carbon;
 
-public function storeWeeklyIncome(Request $request)
+ public function storeWeeklyIncome(Request $request)
 {
     $user = $request->user();
 

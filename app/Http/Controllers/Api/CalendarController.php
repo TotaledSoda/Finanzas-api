@@ -49,24 +49,26 @@ class CalendarController extends Controller
             ->whereBetween('due_date', [$start->toDateString(), $end->toDateString()])
             ->get();
 
-        $billEvents = $bills->map(function (Bill $bill) {
-            return [
-                'source'    => 'bill',
-                'source_id' => $bill->id,
-                'date'      => optional($bill->due_date)->toDateString(),
-                'title'     => $bill->name,
-                'amount'    => (float) $bill->amount,
-                'status'    => $bill->status, // pending / paid
-                'meta'      => [
-                    'type' => 'payment',
-                ],
-            ];
-        });
+        $billEvents = $bills
+            ->map(function (Bill $bill) {
+                return [
+                    'source'    => 'bill',
+                    'source_id' => $bill->id,
+                    'date'      => optional($bill->due_date)->toDateString(),
+                    'title'     => $bill->name,
+                    'amount'    => (float) $bill->amount,
+                    'status'    => $bill->status, // pending / paid
+                    'meta'      => [
+                        'type' => 'payment',
+                    ],
+                ];
+            })
+            ->values()
+            ->all(); // 🔹 lo convertimos en array normal
 
         /**
          * 3) Tandas
          *    - Mostramos el próximo pago de cada tanda en el rango
-         *    - Podrías extender esto calculando TODAS las fechas futuras según frecuencia
          */
         $tandas = Tanda::where(function ($q) use ($user) {
                 $q->where('user_id', $user->id)
@@ -78,21 +80,24 @@ class CalendarController extends Controller
             ->whereBetween('next_payment_date', [$start->toDateString(), $end->toDateString()])
             ->get();
 
-        $tandaEvents = $tandas->map(function (Tanda $tanda) {
-            return [
-                'source'    => 'tanda',
-                'source_id' => $tanda->id,
-                'date'      => optional($tanda->next_payment_date)->toDateString(),
-                'title'     => 'Tanda: '.$tanda->name,
-                'amount'    => (float) $tanda->contribution_amount,
-                'status'    => $tanda->status, // active, finished, cancelled
-                'meta'      => [
-                    'frequency' => $tanda->frequency,
-                    'rounds_total' => $tanda->rounds_total,
-                    'current_round' => $tanda->current_round,
-                ],
-            ];
-        });
+        $tandaEvents = $tandas
+            ->map(function (Tanda $tanda) {
+                return [
+                    'source'    => 'tanda',
+                    'source_id' => $tanda->id,
+                    'date'      => optional($tanda->next_payment_date)->toDateString(),
+                    'title'     => 'Tanda: '.$tanda->name,
+                    'amount'    => (float) $tanda->contribution_amount,
+                    'status'    => $tanda->status, // active, finished, cancelled
+                    'meta'      => [
+                        'frequency'     => $tanda->frequency,
+                        'rounds_total'  => $tanda->rounds_total ?? null,
+                        'current_round' => $tanda->current_round ?? null,
+                    ],
+                ];
+            })
+            ->values()
+            ->all(); // 🔹 array normal
 
         /**
          * 4) Metas de ahorro
@@ -108,21 +113,24 @@ class CalendarController extends Controller
             ->whereBetween('deadline', [$start->toDateString(), $end->toDateString()])
             ->get();
 
-        $goalEvents = $goals->map(function (SavingGoal $goal) {
-            return [
-                'source'    => 'saving_goal',
-                'source_id' => $goal->id,
-                'date'      => optional($goal->deadline)->toDateString(),
-                'title'     => 'Meta: '.$goal->name,
-                'amount'    => (float) $goal->target_amount,
-                'status'    => $goal->status,
-                'meta'      => [
-                    'current_amount'   => (float) $goal->current_amount,
-                    'progress_percent' => $goal->progress_percent,
-                    'is_group'         => (bool) $goal->is_group,
-                ],
-            ];
-        });
+        $goalEvents = $goals
+            ->map(function (SavingGoal $goal) {
+                return [
+                    'source'    => 'saving_goal',
+                    'source_id' => $goal->id,
+                    'date'      => optional($goal->deadline)->toDateString(),
+                    'title'     => 'Meta: '.$goal->name,
+                    'amount'    => (float) $goal->target_amount,
+                    'status'    => $goal->status,
+                    'meta'      => [
+                        'current_amount'   => (float) $goal->current_amount,
+                        'progress_percent' => $goal->progress_percent,
+                        'is_group'         => (bool) $goal->is_group,
+                    ],
+                ];
+            })
+            ->values()
+            ->all(); // 🔹 array normal
 
         /**
          * 5) Eventos manuales (CalendarEvent)
@@ -143,12 +151,13 @@ class CalendarController extends Controller
                         'raw_type' => $ev->type,
                     ],
                 ];
-            });
+            })
+            ->values()
+            ->all(); // 🔹 array normal
 
         /**
          * 6) Gastos diarios (Expense)
-         *    - Aquí no es "evento" individual, sino sumatoria por día.
-         *    - Esto sirve para pintar en el calendario cuánto se gastó por día.
+         *    - Sumatoria por día para pintar en el calendario.
          */
         $dailyExpenses = Expense::where('user_id', $user->id)
             ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
@@ -162,15 +171,18 @@ class CalendarController extends Controller
                     'date'  => $date->toDateString(),
                     'total' => (float) $row->total,
                 ];
-            });
+            })
+            ->values()
+            ->all(); // 🔹 array normal
 
         /**
-         * 7) Mezclamos todos los eventos en un solo array.
+         * 7) Mezclamos todos los eventos en una sola colección normal,
+         *    sin usar Eloquent\Collection para evitar el getKey().
          */
-        $events = $billEvents
-            ->merge($tandaEvents)
-            ->merge($goalEvents)
-            ->merge($manualEvents)
+        $events = collect($billEvents)
+            ->concat($tandaEvents)
+            ->concat($goalEvents)
+            ->concat($manualEvents)
             ->sortBy('date')
             ->values()
             ->all();
